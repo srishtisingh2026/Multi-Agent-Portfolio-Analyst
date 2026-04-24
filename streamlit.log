@@ -1,0 +1,25 @@
+
+  You can now view your Streamlit app in your browser.
+
+  Local URL: http://localhost:8501
+  Network URL: http://172.29.172.158:8501
+
+Error getting response: Error code: 400 - {'error': {'message': "tool call validation failed: parameters for tool fundamental_analysis did not match schema: errors: [missing properties: 'input', additionalProperties 'user_question', 'guidance', 'section' not allowed]", 'type': 'invalid_request_error', 'code': 'tool_use_failed', 'failed_generation': '<function=fundamental_analysis>{"section": "impact of interest rate cut on tech stocks", "user_question": "What is the impact of a 25bps interest rate cut on tech stocks, specifically NVIDIA (NVDA)?", "guidance": "Assess the potential impact of a 25bps interest rate cut on tech stocks, focusing on NVIDIA (NVDA), and provide a realistic price target."}</function>\n\n'}}. (request_id: req_01kpz7n4qwet1ah1gmtn7m39qb)
+[non-fatal] Tracing client error 401: {
+  "error": {
+    "message": "Incorrect API key provided: gsk_m9is********************************************60Cu. You can find your API key at https://platform.openai.com/account/api-keys.",
+    "type": "invalid_request_error",
+    "param": null,
+    "code": "invalid_api_key"
+  }
+}
+Error getting response: Error code: 400 - {'error': {'message': "tool call validation failed: parameters for tool fundamental_analysis did not match schema: errors: [missing properties: 'input', additionalProperties 'section', 'user_question', 'guidance' not allowed]", 'type': 'invalid_request_error', 'code': 'tool_use_failed', 'failed_generation': '<function=fundamental_analysis>{"section": "impact of interest rate cut on tech stocks", "user_question": "What is the impact of a 25bps interest rate cut on tech stocks, specifically NVIDIA (NVDA)?", "guidance": "Assess the potential impact of a 25bps interest rate cut on tech stocks, focusing on NVIDIA (NVDA), and provide a realistic price target."}</function>\n\n'}}. (request_id: req_01kpz7nysree9bfcqp1nn9sc65)
+[non-fatal] Tracing client error 401: {
+  "error": {
+    "message": "Incorrect API key provided: gsk_m9is********************************************60Cu. You can find your API key at https://platform.openai.com/account/api-keys.",
+    "type": "invalid_request_error",
+    "param": null,
+    "code": "invalid_api_key"
+  }
+}
+  Stopping...
