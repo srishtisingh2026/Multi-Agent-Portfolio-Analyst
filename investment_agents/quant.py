@@ -6,7 +6,7 @@ import sys
 
 default_model = "llama-3.1-8b-instant"
 
-def build_quant_agent():
+def build_quant_agent(model=default_model):
     tool_retry_instructions = load_prompt("tool_retry_prompt.md")
     quant_prompt = load_prompt("quant_base.md")
     # Set up the Yahoo Finance MCP server
@@ -23,6 +23,6 @@ def build_quant_agent():
         instructions=(quant_prompt + DISCLAIMER + tool_retry_instructions),
         mcp_servers=[yahoo_mcp_server],
         tools=[run_code_interpreter, get_fred_series, read_file, list_output_files],
-        model=default_model,
+        model=model,
         model_settings=ModelSettings(parallel_tool_calls=True, temperature=0),
-    ) 
+    )

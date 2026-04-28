@@ -1,7 +1,6 @@
 import streamlit as st
 import asyncio
 import os
-import json
 import datetime
 from dotenv import load_dotenv
 
@@ -11,7 +10,12 @@ load_dotenv()
 # Import the core logic from main and agents
 from investment_agents.config import build_investment_agents
 from agents import Runner
-from utils import output_file
+from agents.tracing import set_tracing_disabled
+from contextlib import AsyncExitStack
+from utils import output_file, repo_path, load_prompt, DISCLAIMER
+
+# Disables standard OpenAI remote telemetry/tracing to avoid 401 errors
+set_tracing_disabled(True)
 
 # Set up Page Config
 st.set_page_config(
@@ -54,106 +58,184 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+# --- PROFESSIONAL LIGHT THEME STYLING ---
+st.markdown("""
+<style>
+    /* CLEAN WHITE THEME */
+    .stApp {
+        background-color: #ffffff !important;
+        color: #1e293b !important;
+    }
+    p, span, label, li, h1, h2, h3, h4, h5, h6, .stMarkdown {
+        color: #1e293b !important;
+    }
+    /* BUTTONS: WHITE TEXT ON DARK BACKGROUND */
+    .stButton > button {
+        background-color: #1e293b !important;
+        color: #ffffff !important;
+        border: none !important;
+        padding: 0.6rem 1.2rem !important;
+        border-radius: 8px !important;
+        font-weight: 700 !important;
+        width: 100%;
+        transition: all 0.2s ease !important;
+    }
+    /* FORCE TEXT COLOR TO WHITE */
+    .stButton > button p, .stButton > button div, .stButton > button span {
+        color: #ffffff !important;
+    }
+    .stButton > button:hover {
+        background-color: #3b82f6 !important;
+        color: #ffffff !important;
+    }
+    /* Cards and Info */
+    .custom-info {
+        background: #f1f5f9;
+        border-left: 5px solid #3b82f6;
+        padding: 10px;
+        color: #1e293b !important;
+    }
+    .custom-success {
+        background: #ecfdf5;
+        border-left: 5px solid #10b981;
+        padding: 10px;
+        color: #1e293b !important;
+    }
+    .report-card, .custom-card {
+        background: #ffffff;
+        padding: 20px;
+        border: 1px solid #e2e8f0;
+        border-radius: 8px;
+        color: #1e293b !important;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+# Helper for custom info
+def custom_info(text):
+    st.markdown(f'<div class="custom-info">{text}</div>', unsafe_allow_html=True)
+
+def custom_success(text):
+    st.markdown(f'<div class="custom-success">{text}</div>', unsafe_allow_html=True)
+
+def clean_output(text: str) -> str:
+    """Aggressively remove all technical noise, XML/JSON tags, and log prefixes."""
+    import re
+    if not text:
+        return ""
+    # 1. Remove all XML-like tags: <tag>content</tag>
+    text = re.sub(r'<[^>]+>', '', text)
+    
+    # 2. Remove all JSON-like technical blocks: {"key": "val"}
+    text = re.sub(r'\{[^\}]+\}', '', text)
+    
+    # 3. Remove common technical headers/prefixes
+    prefixes = [
+        "Thought:", "Action:", "Action Input:", "Observation:", 
+        "Final Answer:", "Tool Call:", "Calling tool:", "Output:"
+    ]
+    for p in prefixes:
+        text = text.replace(p, "")
+        
+    # 4. Clean up formatting and whitespace
+    text = text.strip()
+    return text
+
 # Sidebar
 with st.sidebar:
-    st.title("📈 Settings")
-    st.info("Using Groq API with Llama-3.1-8b-instant")
+    st.image("https://cdn-icons-png.flaticon.com/512/3665/3665922.png", width=80)
+    st.title("SETTINGS")
     st.divider()
-    model_choice = st.selectbox("Select Model", ["llama-3.1-8b-instant", "llama-3.1-70b-versatile"])
-    temp = st.slider("Temperature", 0.0, 1.0, 0.0)
+    st.divider()
+    custom_info("💡 PRO-TIP: Try MIXTRAL if Llama is rate-limited. It usually has a separate data bucket.")
+    st.divider()
+    # High-compatibility options
+    model_choice = st.selectbox("MODEL", [
+        "llama-3.3-70b-versatile", 
+        "mixtral-8x7b-32768",
+        "llama-3.1-8b-instant"
+    ], index=1)
+    temp = st.slider("TEMP", 0.0, 1.0, 0.0)
     
-st.title("📈 Multi-Agent Portfolio Analyst")
-st.subheader("Simultaneously coordinate fundamental, macro, and quantitative research.")
+st.title("🔭 PORTFOLIO ANALYST")
+st.markdown("### COORDINATED MULTI-AGENT RESEARCH")
 
 # User Input
-default_q = (
+question = st.text_area("INVESTMENT THESIS REQUEST", value=(
     "Analyze the impact of a potential 25bps interest rate cut on tech stocks, "
     "specifically focusing on NVIDIA (NVDA). What is a realistic price target?"
-)
-question = st.text_area("Investment Question", value=default_q, height=100)
+), height=100)
 
-col1, col2 = st.columns([1, 1])
+col1, col2 = st.columns([1.2, 0.8])
 
 with col1:
-    if st.button("🚀 Run Comprehensive Analysis"):
-        if not os.environ.get("OPENAI_API_KEY") and not os.environ.get("GROQ_API_KEY"):
-            st.error("API Keys missing in .env! Please configure your keys first.")
-        else:
-            with st.status("🤖 Agents are collaborating...", expanded=True) as status:
-                st.write("Initializing Agent Bundle (PM, Macro, Fundamental, Quant)...")
-                bundle = build_investment_agents()
-                
-                # We'll use a placeholder for the output to show progress
-                log_container = st.container()
+    if st.button("RUN COMPREHENSIVE ANALYSIS"):
+        import shutil
+            
+        if os.path.exists("./outputs"):
+            for f in os.listdir("./outputs"):
+                file_path = os.path.join("./outputs", f)
+                try: 
+                    if os.path.isfile(file_path): os.unlink(file_path)
+                except: pass
+
+            with st.status("investigating...", expanded=True) as status:
+                st.write(f"Waking up {model_choice} Brain...")
+                bundle = build_investment_agents(model=model_choice)
                 
                 async def run_analysis():
-                    try:
-                        st.write("🛰️ Connecting to Yahoo Finance MCP Servers...")
-                        # Handle MCP connections simplified for web
-                        st.write("🧠 Portfolio Manager is delegating tasks...")
-                        
-                        response = await Runner.run(bundle.head_pm, question, max_turns=40)
-                        
-                        st.write("✅ Analysis complete. Synthesizing report...")
-                        return response
-                    except Exception as e:
-                        st.error(f"Execution Error: {e}")
-                        return None
+                    async with AsyncExitStack() as stack:
+                        try:
+                            # Handle MCP connections
+                            for agent in [bundle.fundamental, bundle.quant]:
+                                for server in getattr(agent, "mcp_servers", []):
+                                    await server.connect()
+                                    await stack.enter_async_context(server)
+
+                            result = await Runner.run(bundle.head_pm, question, max_turns=40)
+                            return result
+                        except Exception as e:
+                            err_msg = str(e)
+                            st.error(f"Execution Error: {err_msg}")
+                            return None
 
                 response = asyncio.run(run_analysis())
-                status.update(label="Analysis Complete!", state="complete", expanded=False)
-
-            if response:
-                st.success("Investment Memo Generated Successfully!")
                 
-                # Check for output file
-                report_path = None
-                if hasattr(response, 'final_output'):
-                    output = response.final_output
-                    if isinstance(output, str):
-                        try:
-                            data = json.loads(output)
-                            if isinstance(data, dict) and 'file' in data:
-                                report_path = output_file(data['file'])
-                        except: pass
-
-                if report_path and os.path.exists(report_path):
-                    with open(report_path, "r") as f:
-                        report_content = f.read()
-                    
-                    st.divider()
-                    st.subheader("📄 Investment Memo")
-                    st.markdown(f'<div class="report-card">', unsafe_allow_html=True)
-                    st.markdown(report_content)
-                    st.markdown('</div>', unsafe_allow_html=True)
-                    
-                    st.download_button(
-                        label="📥 Download Report (.md)",
-                        data=report_content,
-                        file_name="investment_report.md",
-                        mime="text/markdown"
-                    )
+                if response:
+                    status.update(label="Analysis Complete", state="complete", expanded=False)
                 else:
-                    st.warning("Report file generated, but could not be located in outputs/.")
-                    st.write(response.final_output)
+                    status.update(label="Analysis Failed", state="error", expanded=True)
+
+        if response:
+            processed_output = clean_output(response.final_output)
+            custom_success("INVESTMENT MEMO READY")
+            
+            # --- EXECUTIVE SUMMARY (TL;DR) ---
+            st.markdown('<div class="custom-card">', unsafe_allow_html=True)
+            st.subheader("💡 EXECUTIVE SUMMARY (TL;DR)")
+            # Extract first logical block or first 400 chars for a punchy summary
+            summary_parts = processed_output.split('\n\n')
+            tldr = summary_parts[0] if len(summary_parts[0]) > 50 else processed_output[:400]
+            st.markdown(tldr)
+            st.markdown('</div>', unsafe_allow_html=True)
+
+            # --- FULL DETAILED ANALYSIS ---
+            with st.expander("📄 VIEW FULL DETAILED ANALYSIS", expanded=True):
+                st.markdown('<div class="report-card">', unsafe_allow_html=True)
+                st.markdown(processed_output)
+                st.markdown('</div>', unsafe_allow_html=True)
 
 with col2:
-    st.markdown("""
-    ### 🛡️ Analyst Spans
-    *This section shows the coordination between your agents.*
-    """)
-    
-    with st.expander("Macro Analyst", expanded=True):
-        st.write("Analyze Global Trends, Inflation, and Rates.")
-        st.caption("Active Tools: FRED API, Web Search")
-        
-    with st.expander("Fundamental Analyst", expanded=True):
-        st.write("Analyze Company Financials, Revenue, and Targets.")
-        st.caption("Active Tools: Yahoo Finance MCP")
-        
-    with st.expander("Quantitative Analyst", expanded=True):
-        st.write("Perform Statistical Regressions and Simulations.")
-        st.caption("Active Tools: Local Code Interpreter")
+    st.subheader("ASSETS")
+    asset_path = "./outputs"
+    if os.path.exists(asset_path):
+        files = [f for f in os.listdir(asset_path) if f.endswith(('.csv', '.png', '.json', '.md'))]
+        if files:
+            for f in sorted(files):
+                with open(os.path.join(asset_path, f), "rb") as file:
+                    st.download_button(label=f"DOWNLOAD {f}", data=file, file_name=f, key=f"dl_{f}")
+        else:
+            st.caption("NO FILES YET")
 
 st.divider()
-st.caption(f"System Time: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+st.caption(f"INSTANCE: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")

@@ -3,9 +3,7 @@ from __future__ import annotations
 """Shared utilities for the multi-agent investment workflow."""
 
 from pathlib import Path
-import json
 
-from agents.tracing.processor_interface import TracingExporter
 
 # ---------------------------------------------------------------------------
 # Global disclaimer for all agents
@@ -50,26 +48,6 @@ def load_prompt(name: str, **subs) -> str:
     return content
 
 # ---------------------------------------------------------------------------
-# Local trace exporter
-# ---------------------------------------------------------------------------
-
-class FileSpanExporter(TracingExporter):
-    """Write spans/traces to a JSONL file under `logs/`."""
-
-    def __init__(self, logfile: str | Path = "logs/agent_traces.jsonl") -> None:
-        path = repo_path(logfile)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        self.logfile = path
-
-    def export(self, items):  # noqa: D401 – simple signature required by SDK
-        with self.logfile.open("a", encoding="utf-8") as f:
-            for item in items:
-                try:
-                    f.write(json.dumps(item.export(), default=str) + "\n")
-                except Exception:
-                    f.write(str(item) + "\n")
-
-# ---------------------------------------------------------------------------
 # Output path helper
 # ---------------------------------------------------------------------------
 
@@ -103,6 +81,5 @@ __all__ = [
     "repo_path",
     "outputs_dir",
     "load_prompt",
-    "FileSpanExporter",
     "output_file",
 ] 

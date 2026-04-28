@@ -61,31 +61,81 @@ def run_code_interpreter(request: str, input_files: list[str]) -> str:
     Returns:
         str: JSON string with the analysis results.
     """
+    # 1. Initialize client using environment variables (Groq-compatible)
+    client = OpenAI(
+        api_key=os.environ.get("OPENAI_API_KEY"),
+        base_url=os.environ.get("OPENAI_BASE_URL", "https://api.groq.com/openai/v1")
+    )
+    
+    # 2. Build the detailed request for the code generator
+    system_prompt = CODE_INTERPRETER_INSTRUCTIONS
+    user_prompt = f"Request: {request}\nInput Files: {input_files}\n\nRemember: All files are in ./outputs/"
+    
+    try:
+        completion = client.chat.completions.create(
+            model="llama-3.3-70b-versatile", # Attempting 3.3 for better code quality
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
+            ],
+            temperature=0
+        )
+        code_response = completion.choices[0].message.content
+    except Exception as e:
+        # Fallback to 8b if rate limited or other error
+        completion = client.chat.completions.create(
+            model="llama-3.1-8b-instant",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
+            ],
+            temperature=0
+        )
+        code_response = completion.choices[0].message.content
+
+    # 3. Extract the Python code from the response
+    import re
+    code_match = re.search(r"```python\n(.*?)```", code_response, re.DOTALL)
+    code_to_run = code_match.group(1) if code_match else code_response
+    
+    # Clean up potential markdown formatting if extract failed
+    code_to_run = code_to_run.replace("```python", "").replace("```", "").strip()
+
+    # 4. Monitor the outputs directory for new files
+    files_before = set(os.listdir(OUTPUT_DIR))
+
+    # 5. Execute the code in a subprocess
     import subprocess
     import sys
     
-    # Input validation
-    if not request or not isinstance(request, str):
-        raise ValueError("The 'request' argument must be a non-empty string.")
-    
-    # For this local version, we'll ask the LLM to generate the code in the 'request' 
-    # or we'll wrap the request in a prompt that generates code.
-    # However, to keep it simple and compatible with how the agent expects to work,
-    # we'll use a simple "exec" style approach for now, or just return a simulated result 
-    # if it's too complex. 
-    
-    # BETTER APPROACH: Since we're migrating to Groq and want it to work NOW, 
-    # I'll implement a basic local execution of pandas operations.
-    
-    analysis_results = f"Local Analysis of {', '.join(input_files)}: {request}\n"
-    analysis_results += "(Note: Local Code Interpreter running without OpenAI Cloud Sandbox)\n"
-    
-    # Just a placeholder for now to allow the flow to continue
-    # Real implementation would involve passing the request to the LLM to get code, then running it.
-    
+    try:
+        result = subprocess.run(
+            [sys.executable, "-c", code_to_run],
+            cwd=os.getcwd(),
+            capture_output=True,
+            text=True,
+            timeout=120
+        )
+        
+        execution_out = result.stdout
+        execution_err = result.stderr
+        
+    except subprocess.TimeoutExpired:
+        execution_out = ""
+        execution_err = "Error: Code execution timed out after 120 seconds."
+    except Exception as e:
+        execution_out = ""
+        execution_err = f"Error during subprocess execution: {str(e)}"
+
+    # 6. Identify new files generated
+    files_after = set(os.listdir(OUTPUT_DIR))
+    new_files = list(files_after - files_before)
+
     return json.dumps({
-        "analysis": analysis_results + "\n[SIMULATED QUANTITATIVE RESULT]",
-        "files": [],
+        "analysis_output": execution_out,
+        "execution_errors": execution_err,
+        "files": new_files,
+        "thinking": "Generated and executed local python analysis."
     })
 
 @function_tool
@@ -226,4 +276,22 @@ __all__ = [
     "get_fred_series",
     "list_output_files",
     "read_file",
+    "search_web",
 ] 
+@function_tool
+def search_web(query: str, max_results: int = 5) -> str:
+    """
+    Search the web for up-to-date news and information using DuckDuckGo.
+    """
+    try:
+        from duckduckgo_search import DDGS
+        with DDGS() as ddgs:
+            results = [r for r in ddgs.text(query, max_results=max_results)]
+            if not results:
+                return f"No results found for '{query}'."
+            output = []
+            for r in results:
+                output.append(f"Title: {r.get('title')}\\nSource: {r.get('href')}\\nSnippet: {r.get('body')}\\n")
+            return "\\n".join(output)
+    except Exception as e:
+        return f"Web search failed: {str(e)}"

@@ -42,41 +42,42 @@ async def run_all_specialists_parallel(
         "quant": results[2]
     }
 
-def build_head_pm_agent(fundamental, macro, quant, memo_edit_tool):
+def build_head_pm_agent(fundamental, macro, quant, memo_edit_tool, model="llama-3.3-70b-versatile"):
     def make_agent_tool(agent, name, description):
         @function_tool(name_override=name, description_override=description)
         async def agent_tool(section: str, user_question: str, guidance: str):
             """
             Analyze a specific section of the investment report.
-            Args:
-                section: The section name (e.g., fundamental, macro, quant).
-                user_question: The specific question to answer.
-                guidance: Guidance for the analysis.
             """
             return await specialist_analysis_func(agent, section, user_question, guidance)
         return agent_tool
 
-    fundamental_tool = make_agent_tool(fundamental, "fundamental_analysis", "Generate the Fundamental Analysis section.")
-    macro_tool = make_agent_tool(macro, "macro_analysis", "Generate the Macro Environment section.")
-    quant_tool = make_agent_tool(quant, "quantitative_analysis", "Generate the Quantitative Analysis section.")
+    # PM Tools
+    pm_tools = [
+        make_agent_tool(fundamental, "fundamental_analysis", "Analyze company financials, earnings, and valuation."),
+        make_agent_tool(macro, "macro_analysis", "Analyze economic indicators, rates, and geopolitical impact."),
+        make_agent_tool(quant, "quantitative_analysis", "Perform statistical modeling and data-driven price targets."),
+        memo_edit_tool
+    ]
 
-    @function_tool(name_override="run_all_specialists_parallel", description_override="Run all three specialist analyses (fundamental, macro, quant) in parallel.")
-    async def run_all_specialists_tool(fundamental_q: str, macro_q: str, quant_q: str):
-        return await run_all_specialists_parallel(
-            fundamental, macro, quant,
-            fundamental_q, macro_q, quant_q
-        )
+    # Batch coordination tool
+    @function_tool
+    async def run_all_specialists_parallel_tool(fundamental_q: str, macro_q: str, quant_q: str):
+        """
+        Coordinate all specialist analysts in parallel for a comprehensive review.
+        """
+        return await run_all_specialists_parallel(fundamental, macro, quant, fundamental_q, macro_q, quant_q)
+
+    pm_tools.append(run_all_specialists_parallel_tool)
+
+    tool_retry_instructions = load_prompt("tool_retry_prompt.md")
 
     return Agent(
         name="Head Portfolio Manager Agent",
         instructions=(
-            load_prompt("pm_base.md") + DISCLAIMER
+            load_prompt("pm_base.md") + DISCLAIMER + tool_retry_instructions
         ),
-        model="llama-3.1-8b-instant",
-        #Reasoning model
-        #model="o4-mini",
-        tools=[fundamental_tool, macro_tool, quant_tool, memo_edit_tool, run_all_specialists_tool],
-        # Settings for a reasoning model
-        #model_settings=ModelSettings(parallel_tool_calls=True, reasoning={"summary": "auto", "effort": "high"}, tool_choice="auto")
+        model=model,
+        tools=pm_tools,
         model_settings=ModelSettings(parallel_tool_calls=True, tool_choice="auto", temperature=0)
-    ) 
+    )

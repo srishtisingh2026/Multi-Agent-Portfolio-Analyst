@@ -1,4 +1,5 @@
-from agents import Agent, WebSearchTool, ModelSettings, function_tool
+from agents import Agent, ModelSettings
+from tools import read_file, list_output_files, search_web
 from utils import load_prompt, DISCLAIMER, repo_path
 from pathlib import Path
 import sys
@@ -7,7 +8,7 @@ default_model = "llama-3.1-8b-instant"
 default_search_context = "medium"
 RECENT_DAYS = 15
 
-def build_fundamental_agent():
+def build_fundamental_agent(model=default_model):
     tool_retry_instructions = load_prompt("tool_retry_prompt.md")
     fundamental_prompt = load_prompt("fundamental_base.md", RECENT_DAYS=RECENT_DAYS)
     # Set up the Yahoo Finance MCP server
@@ -18,17 +19,12 @@ def build_fundamental_agent():
         client_session_timeout_seconds=300,
         cache_tools_list=True,
     )
-    
-    @function_tool
-    def web_search(query: str) -> str:
-        """Search the web for up-to-date information."""
-        return f"Search result for '{query}': Due to Groq migration, real-time web search is currently using simulated results. [Search: {query}]"
 
     return Agent(
         name="Fundamental Analysis Agent",
         instructions=(fundamental_prompt + DISCLAIMER + tool_retry_instructions),
         mcp_servers=[yahoo_mcp_server],
-        tools=[web_search],
-        model=default_model,
+        tools=[search_web, read_file, list_output_files],
+        model=model,
         model_settings=ModelSettings(parallel_tool_calls=True, temperature=0),
-    ) 
+    )

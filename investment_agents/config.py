@@ -14,13 +14,13 @@ class InvestmentAgentsBundle:
     quant: object
 
 
-def build_investment_agents() -> InvestmentAgentsBundle:
-    fundamental = build_fundamental_agent()
-    macro = build_macro_agent()
-    quant = build_quant_agent()
-    editor = build_editor_agent()
+def build_investment_agents(model: str = "llama-3.3-70b-versatile") -> InvestmentAgentsBundle:
+    fundamental = build_fundamental_agent(model=model)
+    macro = build_macro_agent(model=model)
+    quant = build_quant_agent(model=model)
+    editor = build_editor_agent(model=model)
     memo_edit_tool = build_memo_edit_tool(editor)
-    head_pm = build_head_pm_agent(fundamental, macro, quant, memo_edit_tool)
+    head_pm = build_head_pm_agent(fundamental, macro, quant, memo_edit_tool, model=model)
     return InvestmentAgentsBundle(
         head_pm=head_pm,
         fundamental=fundamental,
