@@ -3,8 +3,14 @@ from __future__ import annotations
 """Shared utilities for the multi-agent investment workflow."""
 
 from pathlib import Path
+import smartllmops
 
-
+global_tracer = smartllmops.init(
+    environment="development",
+    model="llama-3.1-8b-instant",
+    provider="groq",
+    application_name="PortfolioAnalyst"
+)
 # ---------------------------------------------------------------------------
 # Global disclaimer for all agents
 # ---------------------------------------------------------------------------
@@ -82,4 +88,5 @@ __all__ = [
     "outputs_dir",
     "load_prompt",
     "output_file",
+    "global_tracer",
 ] 

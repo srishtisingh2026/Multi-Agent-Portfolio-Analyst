@@ -1,5 +1,5 @@
 from agents import Agent, ModelSettings, function_tool, Runner
-from utils import load_prompt, DISCLAIMER
+from utils import load_prompt, DISCLAIMER, global_tracer
 from dataclasses import dataclass
 from pydantic import BaseModel
 import json
@@ -19,32 +19,41 @@ async def specialist_analysis_func(agent, section: str, user_question: str, guid
         "user_question": user_question,
         "guidance": guidance
     }
-    result = await Runner.run(
-        starting_agent=agent,
-        input=json.dumps(input_data),
-        max_turns=75,
-    )
+    @global_tracer.trace(span_type="agent", name=f"Agent: {agent.name}")
+    async def _run_agent():
+        return await Runner.run(
+            starting_agent=agent,
+            input=json.dumps(input_data),
+            max_turns=75,
+        )
+    
+    result = await _run_agent()
     return result.final_output
 
+@global_tracer.trace(span_type="chain", name="Parallel Specialist Orchestration")
 async def run_all_specialists_parallel(
     fundamental, macro, quant,
     fundamental_q: str, macro_q: str, quant_q: str
 ):
-    # Simplified inputs for parallel run
-    results = await asyncio.gather(
-        specialist_analysis_func(fundamental, "fundamental", fundamental_q, "Analyze NVDA fundamentals."),
-        specialist_analysis_func(macro, "macro", macro_q, "Analyze macro impact."),
-        specialist_analysis_func(quant, "quant", quant_q, "Perform quant analysis.")
-    )
+    # Running sequentially with a mandated wait to avoid 6,000 Tokens/Min Groq Rate Limits
+    res_fund = await specialist_analysis_func(fundamental, "fundamental", fundamental_q, "Analyze NVDA fundamentals.")
+    await asyncio.sleep(30)  # Wait 30s to drain token bucket
+    
+    res_macro = await specialist_analysis_func(macro, "macro", macro_q, "Analyze macro impact.")
+    await asyncio.sleep(30)
+    
+    res_quant = await specialist_analysis_func(quant, "quant", quant_q, "Perform quant analysis.")
+    
     return {
-        "fundamental": results[0],
-        "macro": results[1],
-        "quant": results[2]
+        "fundamental": res_fund,
+        "macro": res_macro,
+        "quant": res_quant
     }
 
 def build_head_pm_agent(fundamental, macro, quant, memo_edit_tool, model="llama-3.3-70b-versatile"):
     def make_agent_tool(agent, name, description):
         @function_tool(name_override=name, description_override=description)
+        @global_tracer.trace(span_type="chain", name=f"Delegate to: {name}")
         async def agent_tool(section: str, user_question: str, guidance: str):
             """
             Analyze a specific section of the investment report.
@@ -62,6 +71,7 @@ def build_head_pm_agent(fundamental, macro, quant, memo_edit_tool, model="llama-
 
     # Batch coordination tool
     @function_tool
+    @global_tracer.trace(span_type="chain", name="Parallel Coordination Tool")
     async def run_all_specialists_parallel_tool(fundamental_q: str, macro_q: str, quant_q: str):
         """
         Coordinate all specialist analysts in parallel for a comprehensive review.
@@ -79,5 +89,5 @@ def build_head_pm_agent(fundamental, macro, quant, memo_edit_tool, model="llama-
         ),
         model=model,
         tools=pm_tools,
-        model_settings=ModelSettings(parallel_tool_calls=True, tool_choice="auto", temperature=0)
+        model_settings=ModelSettings(parallel_tool_calls=False, tool_choice="auto", temperature=0)
     )

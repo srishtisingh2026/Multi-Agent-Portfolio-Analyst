@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 import warnings
 warnings.filterwarnings("ignore", category=UserWarning)
+warnings.filterwarnings("ignore", category=RuntimeWarning)
 import re
 
 # ---------------------------------------------------------------------------
@@ -23,7 +24,7 @@ from openai import OpenAI
 # ---------------------------------------------------------------------------
 
 from agents import function_tool
-from utils import outputs_dir, output_file
+from utils import outputs_dir, output_file, global_tracer
 
 # ---------------------------------------------------------------------------
 # Repository paths & globals
@@ -49,7 +50,8 @@ def code_interpreter_error_handler(ctx, error):
     )
 
 @function_tool(failure_error_function=code_interpreter_error_handler)
-def run_code_interpreter(request: str, input_files: list[str]) -> str:
+@global_tracer.trace(span_type="tool")
+async def run_code_interpreter(request: str, input_files: list[str]) -> str:
     """
     Executes a quantitative analysis request using a local Python environment.
     Note: In this Groq-compatible version, we use local execution instead of OpenAI's cloud sandbox.
@@ -73,7 +75,7 @@ def run_code_interpreter(request: str, input_files: list[str]) -> str:
     
     try:
         completion = client.chat.completions.create(
-            model="llama-3.3-70b-versatile", # Attempting 3.3 for better code quality
+            model="llama-3.1-8b-instant", # Attempting 8b instead to avoid rate limits
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt}
@@ -139,17 +141,29 @@ def run_code_interpreter(request: str, input_files: list[str]) -> str:
     })
 
 @function_tool
-def write_markdown(filename: str, content: str) -> str:
+@global_tracer.trace(span_type="tool")
+async def write_markdown(filename: str, content: str) -> str:
     """Write `content` to `outputs/filename` and return confirmation JSON."""
     if not filename.endswith(".md"):
         filename += ".md"
     path = output_file(filename)
-    with open(path, "w", encoding="utf-8") as f:
-        f.write(content)
-    return json.dumps({"file": filename})
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(content)
+        return json.dumps({
+            "status": "success",
+            "file": filename,
+            "message": "SUCCESS: The file has been written successfully. You have completed your task. Do NOT call this tool again. Output the word 'Finished' to the user and stop."
+        })
+    except Exception as e:
+        return json.dumps({
+            "status": "error",
+            "message": f"Failed to write file: {str(e)}"
+        })
 
 @function_tool
-def read_file(filename: str, n_rows: int = 10) -> str:
+@global_tracer.trace(span_type="tool")
+async def read_file(filename: str, n_rows: int = 10) -> str:
     """
     Read and preview the contents of a file from the outputs directory.
 
@@ -188,7 +202,8 @@ def read_file(filename: str, n_rows: int = 10) -> str:
         return json.dumps({"error": f"Unsupported file type: {suffix}", "file": filename})
 
 @function_tool
-def get_fred_series(series_id: str, start_date: str, end_date: str, download_csv: bool = False) -> str:
+@global_tracer.trace(span_type="tool")
+async def get_fred_series(series_id: str, start_date: str, end_date: str, download_csv: bool = False) -> str:
     """Fetches a FRED economic time-series and returns simple summary statistics.
 
     Parameters
@@ -256,7 +271,8 @@ def get_fred_series(series_id: str, start_date: str, end_date: str, download_csv
         return json.dumps({"error": str(e), "series_id": series_id})
 
 @function_tool
-def list_output_files(extension: str = None) -> str:
+@global_tracer.trace(span_type="tool")
+async def list_output_files(extension: str = None) -> str:
     """
     List all files in the outputs directory. Optionally filter by file extension (e.g., 'png', 'csv', 'md').
     Returns a JSON list of filenames.
@@ -279,12 +295,13 @@ __all__ = [
     "search_web",
 ] 
 @function_tool
-def search_web(query: str, max_results: int = 5) -> str:
+@global_tracer.trace(span_type="tool")
+async def search_web(query: str, max_results: int = 5) -> str:
     """
     Search the web for up-to-date news and information using DuckDuckGo.
     """
     try:
-        from duckduckgo_search import DDGS
+        from ddgs import DDGS
         with DDGS() as ddgs:
             results = [r for r in ddgs.text(query, max_results=max_results)]
             if not results:

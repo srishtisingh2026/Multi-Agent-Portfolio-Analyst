@@ -12,7 +12,7 @@ from investment_agents.config import build_investment_agents
 from agents import Runner
 from agents.tracing import set_tracing_disabled
 from contextlib import AsyncExitStack
-from utils import output_file, repo_path, load_prompt, DISCLAIMER
+from utils import output_file, repo_path, load_prompt, DISCLAIMER, global_tracer
 
 # Disables standard OpenAI remote telemetry/tracing to avoid 401 errors
 set_tracing_disabled(True)
@@ -123,11 +123,7 @@ def clean_output(text: str) -> str:
     import re
     if not text:
         return ""
-    # 1. Remove all XML-like tags: <tag>content</tag>
-    text = re.sub(r'<[^>]+>', '', text)
-    
-    # 2. Remove all JSON-like technical blocks: {"key": "val"}
-    text = re.sub(r'\{[^\}]+\}', '', text)
+    # (Removed aggressive XML and JSON regex stripping to prevent destroying valid outputs)
     
     # 3. Remove common technical headers/prefixes
     prefixes = [
@@ -154,7 +150,7 @@ with st.sidebar:
         "llama-3.3-70b-versatile", 
         "mixtral-8x7b-32768",
         "llama-3.1-8b-instant"
-    ], index=1)
+    ], index=2)
     temp = st.slider("TEMP", 0.0, 1.0, 0.0)
     
 st.title("🔭 PORTFOLIO ANALYST")
@@ -192,8 +188,23 @@ with col1:
                                     await server.connect()
                                     await stack.enter_async_context(server)
 
-                            result = await Runner.run(bundle.head_pm, question, max_turns=40)
-                            return result
+                            global_tracer.start_trace()
+                            
+                            @global_tracer.trace(span_type="agent", name="Agent: Head Portfolio Manager")
+                            async def execute_agent():
+                                return await Runner.run(bundle.head_pm, question, max_turns=40)
+
+                            result = None
+                            try:
+                                result = await execute_agent()
+                                return result
+                            finally:
+                                out_msg = result.final_output if hasattr(result, 'final_output') else (str(result) if result else "Execution Failed")
+                                global_tracer.export_trace(
+                                    out_msg,
+                                    query=question,
+                                    session_id="streamlit-session"
+                                )
                         except Exception as e:
                             err_msg = str(e)
                             st.error(f"Execution Error: {err_msg}")
